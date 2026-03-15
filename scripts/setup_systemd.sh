@@ -18,17 +18,13 @@ setup_systemd() {
 
     # Start/restart services in correct order
     # 1. phonx-core first (cover site must be ready for Xray fallback)
-    log_info "Starting phonx-core..."
-    if [[ "${PHONX_CORE_AVAILABLE:-true}" == "true" ]] && [[ -x /usr/local/bin/phonx-core ]]; then
-        systemctl restart phonx-core.service
-        sleep 1
-        if systemctl is-active --quiet phonx-core.service; then
-            log_ok "phonx-core is running."
-        else
-            log_warn "phonx-core failed to start. Check: journalctl -u phonx-core -n 20"
-        fi
+    log_info "Starting phonx-core (cover site server)..."
+    systemctl restart phonx-core.service
+    sleep 1
+    if systemctl is-active --quiet phonx-core.service; then
+        log_ok "phonx-core is running."
     else
-        log_warn "phonx-core not available, skipping start."
+        log_warn "phonx-core failed to start. Check: journalctl -u phonx-core -n 20"
     fi
 
     # 2. Xray (proxy)
@@ -76,7 +72,6 @@ Type=simple
 ExecStart=/usr/local/bin/dnstt-server \\
     -privkey-file ${PHONX_DIR}/dnstt_key.priv \\
     -udp :53 \\
-    -tcp :53 \\
     ${DNSTT_DOMAIN} \\
     127.0.0.1:10001
 Restart=always
@@ -141,7 +136,9 @@ XRAYSERVICE
 create_phonx_core_service() {
     log_info "Creating phonx-core.service..."
 
-    cat > /etc/systemd/system/phonx-core.service <<'CORESERVICE'
+    if [[ -x /usr/local/bin/phonx-core ]]; then
+        # Full phonx-core daemon
+        cat > /etc/systemd/system/phonx-core.service <<'CORESERVICE'
 [Unit]
 Description=PhonX Core Daemon
 After=network-online.target
@@ -171,4 +168,35 @@ SyslogIdentifier=phonx-core
 [Install]
 WantedBy=multi-user.target
 CORESERVICE
+    else
+        # Fallback: serve cover site with Python HTTP server until phonx-core is available
+        log_info "phonx-core not found — using Python HTTP server for cover site."
+        cat > /etc/systemd/system/phonx-core.service <<'CORESERVICE'
+[Unit]
+Description=PhonX Cover Site (temporary — Python HTTP server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /etc/phonx/cover
+Restart=always
+RestartSec=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/phonx/cover
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=phonx-core
+
+[Install]
+WantedBy=multi-user.target
+CORESERVICE
+    fi
 }
