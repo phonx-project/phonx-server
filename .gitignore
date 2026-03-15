@@ -1,0 +1,30 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets / runtime state (should never be in repo)
+*.priv
+*.pem
+server.json
+users/
+
+# Downloaded binaries
+dnstt-server
+xray
+phonx-core
+*.zip
+
+# Cover site build artifacts
+cover/
+
+# Temp
+*.tmp
+*.bak
+.claude/settings.local.json
+plan.md
