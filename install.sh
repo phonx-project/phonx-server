@@ -442,9 +442,13 @@ show_completion() {
 
     # Print service status summary
     echo -e "${BOLD}Service Status:${NC}"
-    echo -e "  dnstt-server: $(systemctl is-active dnstt-server.service 2>/dev/null || echo 'unknown')"
-    echo -e "  xray:         $(systemctl is-active xray.service 2>/dev/null || echo 'unknown')"
-    echo -e "  phonx-core:   $(systemctl is-active phonx-core.service 2>/dev/null || echo 'unknown')"
+    local svc_dnstt svc_xray svc_core
+    svc_dnstt=$(systemctl is-active dnstt-server.service 2>/dev/null) || true
+    svc_xray=$(systemctl is-active xray.service 2>/dev/null) || true
+    svc_core=$(systemctl is-active phonx-core.service 2>/dev/null) || true
+    echo -e "  dnstt-server: ${svc_dnstt:-unknown}"
+    echo -e "  xray:         ${svc_xray:-unknown}"
+    echo -e "  phonx-core:   ${svc_core:-unknown}"
     echo ""
 
     echo -e "${BOLD}Server Details:${NC}"
