@@ -1,5 +1,39 @@
 #!/usr/bin/env bash
-# Configure iptables firewall rules
+# Configure iptables and ip6tables firewall rules
+
+apply_rules() {
+    local cmd="$1"
+
+    # Allow loopback
+    $cmd -C INPUT -i lo -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -i lo -j ACCEPT
+
+    # Allow established/related connections
+    $cmd -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # Allow SSH (port 22) — critical: don't lock ourselves out
+    $cmd -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -p tcp --dport 22 -j ACCEPT
+
+    # Allow DNS (port 53) for dnstt — both TCP and UDP
+    $cmd -C INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -p udp --dport 53 -j ACCEPT
+    $cmd -C INPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -p tcp --dport 53 -j ACCEPT
+
+    # Allow HTTP (port 80) — for future Let's Encrypt (Phase 2)
+    $cmd -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -p tcp --dport 80 -j ACCEPT
+
+    # Allow HTTPS (port 443) — Xray proxy + cover site
+    $cmd -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || \
+        $cmd -A INPUT -p tcp --dport 443 -j ACCEPT
+
+    # Set default policy to DROP for INPUT
+    # Internal ports (8080, 10001) are localhost-only — default DROP protects them
+    $cmd -P INPUT DROP
+}
 
 setup_firewall() {
     log_step "Configuring firewall..."
@@ -11,41 +45,17 @@ setup_firewall() {
         return 0
     fi
 
-    # Flush existing INPUT rules (preserve other chains)
-    # We rebuild the INPUT chain from scratch
-    log_info "Applying firewall rules..."
+    # IPv4 rules
+    log_info "Applying IPv4 firewall rules..."
+    apply_rules iptables
+    log_ok "IPv4 firewall rules applied."
 
-    # Allow loopback
-    iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -i lo -j ACCEPT
-
-    # Allow established/related connections
-    iptables -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-    # Allow SSH (port 22) — critical: don't lock ourselves out
-    iptables -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-
-    # Allow DNS (port 53) for dnstt — both TCP and UDP
-    iptables -C INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -p udp --dport 53 -j ACCEPT
-    iptables -C INPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -p tcp --dport 53 -j ACCEPT
-
-    # Allow HTTP (port 80) — for future Let's Encrypt (Phase 2)
-    iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-
-    # Allow HTTPS (port 443) — Xray proxy + cover site
-    iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || \
-        iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-
-    # Set default policy to DROP for INPUT
-    # Internal ports (8080, 10001) are localhost-only — default DROP protects them
-    iptables -P INPUT DROP
-
-    log_ok "Firewall rules applied."
+    # IPv6 rules
+    if command -v ip6tables &>/dev/null; then
+        log_info "Applying IPv6 firewall rules..."
+        apply_rules ip6tables
+        log_ok "IPv6 firewall rules applied."
+    fi
 
     # --- Persist rules across reboots ---
     persist_firewall_rules
@@ -70,10 +80,10 @@ persist_firewall_rules() {
                 netfilter-persistent save 2>/dev/null || true
                 log_ok "Firewall rules persisted (netfilter-persistent)."
             else
-                # Fallback: save manually
                 mkdir -p /etc/iptables
                 iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-                log_ok "Firewall rules saved to /etc/iptables/rules.v4"
+                ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+                log_ok "Firewall rules saved to /etc/iptables/"
             fi
             ;;
 
@@ -86,6 +96,7 @@ persist_firewall_rules() {
             fi
             service iptables save 2>/dev/null || \
                 iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+            ip6tables-save > /etc/sysconfig/ip6tables 2>/dev/null || true
             log_ok "Firewall rules persisted (iptables-services)."
             ;;
 
@@ -93,17 +104,18 @@ persist_firewall_rules() {
             # Generic fallback
             mkdir -p /etc/iptables
             iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
 
-            # Create a restore script for boot
             if [[ ! -f /etc/network/if-pre-up.d/iptables ]]; then
                 mkdir -p /etc/network/if-pre-up.d
                 cat > /etc/network/if-pre-up.d/iptables <<'IPTSCRIPT'
 #!/bin/sh
 /sbin/iptables-restore < /etc/iptables/rules.v4
+/sbin/ip6tables-restore < /etc/iptables/rules.v6 2>/dev/null || true
 IPTSCRIPT
                 chmod +x /etc/network/if-pre-up.d/iptables
             fi
-            log_ok "Firewall rules saved to /etc/iptables/rules.v4"
+            log_ok "Firewall rules saved to /etc/iptables/"
             ;;
     esac
 }
