@@ -86,40 +86,116 @@ check_root() {
     fi
 }
 
+run_uninstall() {
+    echo ""
+    echo -e "${YELLOW}WARNING: This will delete your dnstt keypair and TLS certificate.${NC}"
+    echo -e "${YELLOW}All existing client configs will stop working.${NC}"
+    echo ""
+    read -r -p "Are you sure? [y/N] " confirm < /dev/tty
+    case "$confirm" in
+        [yY]|[yY][eE][sS]) ;;
+        *) log_info "Cancelled."; exit 0 ;;
+    esac
+
+    echo ""
+
+    # Stop and disable services
+    log_info "Stopping services..."
+    for svc in dnstt-server xray phonx-core; do
+        if systemctl is-active --quiet "${svc}.service" 2>/dev/null; then
+            systemctl stop "${svc}.service" 2>/dev/null || true
+        fi
+        if systemctl is-enabled --quiet "${svc}.service" 2>/dev/null; then
+            systemctl disable "${svc}.service" 2>/dev/null || true
+        fi
+        rm -f "/etc/systemd/system/${svc}.service"
+    done
+    systemctl daemon-reload 2>/dev/null || true
+    log_ok "Services removed."
+
+    # Remove binaries
+    log_info "Removing binaries..."
+    for bin in /usr/local/bin/dnstt-server /usr/local/bin/xray /usr/local/bin/phonx-core; do
+        rm -f "$bin"
+    done
+    rm -rf /usr/local/share/xray 2>/dev/null || true
+    log_ok "Binaries removed."
+
+    # Backup config before deletion
+    local BACKUP="/root/phonx-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+    log_info "Backing up ${PHONX_DIR} to ${BACKUP}..."
+    tar czf "$BACKUP" -C /etc phonx 2>/dev/null || true
+    log_ok "Backup saved to ${BACKUP}"
+
+    # Remove config directory
+    rm -rf "$PHONX_DIR"
+    log_ok "Configuration removed."
+
+    # Reset firewall
+    log_info "Resetting firewall to ACCEPT all..."
+    iptables -P INPUT ACCEPT 2>/dev/null || true
+    iptables -F INPUT 2>/dev/null || true
+    ip6tables -P INPUT ACCEPT 2>/dev/null || true
+    ip6tables -F INPUT 2>/dev/null || true
+    if command -v netfilter-persistent &>/dev/null; then
+        netfilter-persistent save 2>/dev/null || true
+    fi
+    log_ok "Firewall reset."
+
+    # Clean up logs
+    rm -rf /var/log/xray 2>/dev/null || true
+
+    echo ""
+    echo -e "${GREEN}${BOLD}PhonX has been uninstalled.${NC}"
+    echo -e "Backup: ${CYAN}${BACKUP}${NC}"
+    echo -e "To restore: tar xzf ${BACKUP} -C /etc"
+    echo ""
+}
+
 check_existing_install() {
     if [[ -d "$PHONX_DIR" ]] && [[ -f "${PHONX_DIR}/server.json" ]]; then
         EXISTING_INSTALL=true
         log_warn "Existing PhonX installation detected at ${PHONX_DIR}"
-        log_info "The following will be ${GREEN}preserved${NC}:"
-        log_info "  - dnstt keypair (dnstt_key.priv, dnstt_key.pub)"
-        log_info "  - TLS certificate (tls_cert.pem, tls_key.pem)"
-        log_info "  - WebSocket path and UUIDs"
-        log_info "  - User configs (users/)"
-        log_info "The following will be ${YELLOW}updated${NC}:"
-        log_info "  - Binaries (dnstt-server, xray, phonx-core)"
-        log_info "  - Systemd service files"
+        echo ""
+        echo -e "  ${CYAN}[u]${NC} Update — keep keys/UUIDs, update binaries & services"
+        echo -e "  ${CYAN}[f]${NC} Fresh install — remove everything, install from scratch"
+        echo -e "  ${CYAN}[r]${NC} Remove — uninstall PhonX completely"
+        echo -e "  ${CYAN}[q]${NC} Quit"
         echo ""
 
-        # Load existing values to preserve them
-        if command -v jq &>/dev/null && [[ -f "${PHONX_DIR}/server.json" ]]; then
-            EXISTING_UUID=$(jq -r '.uuid // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
-            EXISTING_WS_PATH=$(jq -r '.ws_path // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
-        fi
+        read -r -p "Choose [u/f/r/q]: " choice < /dev/tty
+        case "$choice" in
+            [uU])
+                log_info "Updating — preserving existing config..."
+                log_info "  ${GREEN}Keeping:${NC} keys, certs, UUIDs, WS path, user configs"
+                log_info "  ${YELLOW}Updating:${NC} binaries, systemd services"
 
-        # Also try to extract UUID from existing xray.json
-        if [[ -z "${EXISTING_UUID:-}" ]] && [[ -f "${PHONX_DIR}/xray.json" ]]; then
-            EXISTING_UUID=$(jq -r '.inbounds[1].settings.clients[0].id // empty' "${PHONX_DIR}/xray.json" 2>/dev/null || true)
-        fi
-        if [[ -z "${EXISTING_WS_PATH:-}" ]] && [[ -f "${PHONX_DIR}/xray.json" ]]; then
-            EXISTING_WS_PATH=$(jq -r '.inbounds[1].streamSettings.wsSettings.path // empty' "${PHONX_DIR}/xray.json" 2>/dev/null || true)
-        fi
+                # Load existing values to preserve them
+                if command -v jq &>/dev/null; then
+                    EXISTING_UUID=$(jq -r '.uuid // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
+                    EXISTING_WS_PATH=$(jq -r '.ws_path // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
+                fi
+                if [[ -z "${EXISTING_UUID:-}" ]] && [[ -f "${PHONX_DIR}/xray.json" ]]; then
+                    EXISTING_UUID=$(jq -r '.inbounds[1].settings.clients[0].id // empty' "${PHONX_DIR}/xray.json" 2>/dev/null || true)
+                fi
+                if [[ -z "${EXISTING_WS_PATH:-}" ]] && [[ -f "${PHONX_DIR}/xray.json" ]]; then
+                    EXISTING_WS_PATH=$(jq -r '.inbounds[1].streamSettings.wsSettings.path // empty' "${PHONX_DIR}/xray.json" 2>/dev/null || true)
+                fi
 
-        FORCE_UPDATE=true
-
-        read -r -p "Continue with update? [Y/n] " response < /dev/tty
-        case "$response" in
-            [nN]|[nN][oO])
-                log_info "Installation cancelled."
+                FORCE_UPDATE=true
+                ;;
+            [fF])
+                log_warn "Fresh install — removing existing installation first..."
+                run_uninstall
+                EXISTING_INSTALL=false
+                FORCE_UPDATE=false
+                ;;
+            [rR])
+                run_uninstall
+                exit 0
+                ;;
+            *)
+                log_info "Cancelled."
                 exit 0
                 ;;
         esac

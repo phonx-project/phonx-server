@@ -18,13 +18,11 @@ log_error() { echo -e "${RED}[✗]${NC} $*" >&2; }
 
 PHONX_DIR="/etc/phonx"
 
-# Must be root
 if [[ "$(id -u)" -ne 0 ]]; then
     log_error "This script must be run as root."
     exit 1
 fi
 
-# Check if PhonX is installed
 if [[ ! -d "$PHONX_DIR" ]]; then
     log_error "PhonX does not appear to be installed (/etc/phonx not found)."
     exit 1
@@ -94,7 +92,6 @@ iptables -F INPUT 2>/dev/null || true
 ip6tables -P INPUT ACCEPT 2>/dev/null || true
 ip6tables -F INPUT 2>/dev/null || true
 
-# Persist clean state
 if command -v netfilter-persistent &>/dev/null; then
     netfilter-persistent save 2>/dev/null || true
 elif [[ -f /etc/iptables/rules.v4 ]]; then
