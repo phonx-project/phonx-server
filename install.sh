@@ -197,6 +197,10 @@ ask_dns_domains() {
     echo -e "nameserver for t.yourdomain.com. The A record (glue record) maps the"
     echo -e "nameserver hostname to your server's IP address.${NC}"
     echo ""
+    echo -e "${YELLOW}Cloudflare users:${NC} The A record MUST use ${YELLOW}gray cloud (DNS only)${NC}."
+    echo -e "${DIM}Proxy (orange cloud) would route queries to Cloudflare's IP instead of"
+    echo -e "your VPS, and port 53 traffic would never reach dnstt-server.${NC}"
+    echo ""
     echo -e "${DIM}Domain should be boring/innocuous (e.g., recipe-notes-app.com, not vpn-bypass.com)${NC}"
     echo ""
 
@@ -282,8 +286,24 @@ verify_dns_records() {
     echo ""
 
     # Check NS record: t.domain.com should have NS pointing to ns.domain.com
-    local ns_result
-    ns_result=$(dig +short NS "${first_domain}" @8.8.8.8 2>/dev/null | head -1 | sed 's/\.$//')
+    # We query the PARENT zone's nameserver directly (+norecurse) because
+    # a recursive query would follow the delegation to our VPS port 53,
+    # where dnstt-server isn't running yet — causing a false negative.
+    local ns_result=""
+    local parent_ns
+    parent_ns=$(dig +short NS "${base_domain}" @8.8.8.8 2>/dev/null | head -1 | sed 's/\.$//')
+
+    if [[ -n "$parent_ns" ]]; then
+        # Query parent nameserver directly for the delegation (non-recursive)
+        ns_result=$(dig NS "${first_domain}" @"${parent_ns}" +norecurse 2>/dev/null \
+            | grep -i "IN.*NS" | grep -v "^;" \
+            | awk '{print $NF}' | sed 's/\.$//' | head -1)
+    fi
+
+    # Fallback: try recursive query in case the above didn't work
+    if [[ -z "$ns_result" ]]; then
+        ns_result=$(dig +short NS "${first_domain}" @8.8.8.8 2>/dev/null | head -1 | sed 's/\.$//')
+    fi
 
     local expected_ns="ns.${base_domain}"
 
@@ -332,8 +352,9 @@ verify_dns_records() {
     echo -e "(e.g., Namecheap, Porkbun, Cloudflare):"
     echo ""
     echo -e "  ${CYAN}1.${NC} NS record:  ${GREEN}${first_domain}${NC}  →  ${GREEN}ns.${base_domain}${NC}"
-    echo -e "  ${CYAN}2.${NC} A  record:  ${GREEN}ns.${base_domain}${NC}  →  ${GREEN}${SERVER_IP}${NC}"
+    echo -e "  ${CYAN}2.${NC} A  record:  ${GREEN}ns.${base_domain}${NC}  →  ${GREEN}${SERVER_IP}${NC}  ${YELLOW}(gray cloud / DNS only)${NC}"
     echo ""
+    echo -e "${DIM}Cloudflare users: the A record MUST have proxy OFF (gray cloud).${NC}"
     echo -e "${DIM}Note: DNS changes can take up to 48 hours to propagate.${NC}"
     echo -e "${DIM}Check propagation at: https://dnschecker.org${NC}"
     echo ""
