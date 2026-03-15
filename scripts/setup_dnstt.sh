@@ -67,12 +67,16 @@ setup_dnstt() {
         log_info "Downloading dnstt-server (${ARCH_SUFFIX})..."
         local DNSTT_URL="${PHONX_RELEASES}/dnstt-server-linux-${ARCH_SUFFIX}"
 
-        if ! curl -fSL --progress-bar "$DNSTT_URL" -o "${DNSTT_BIN}.tmp"; then
-            log_error "Failed to download dnstt-server from:"
-            log_error "  ${DNSTT_URL}"
-            log_error ""
-            log_error "Make sure the binary is available at phonx-project releases."
-            exit 1
+        if ! curl -fSL --progress-bar "$DNSTT_URL" -o "${DNSTT_BIN}.tmp" 2>/dev/null; then
+            rm -f "${DNSTT_BIN}.tmp"
+            if [[ -f "$DNSTT_BIN" ]]; then
+                log_warn "Could not download latest dnstt-server, keeping existing binary."
+            else
+                log_error "Failed to download dnstt-server from:"
+                log_error "  ${DNSTT_URL}"
+                log_error "Make sure the binary is available at phonx-project releases."
+                exit 1
+            fi
         fi
 
         mv "${DNSTT_BIN}.tmp" "$DNSTT_BIN"

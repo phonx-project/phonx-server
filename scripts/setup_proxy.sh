@@ -15,29 +15,33 @@ setup_proxy() {
         local XRAY_URL="${XRAY_RELEASES}/${XRAY_ZIP_NAME}"
         local XRAY_TMP=$(mktemp -d)
 
-        if ! curl -fSL --progress-bar "$XRAY_URL" -o "${XRAY_TMP}/${XRAY_ZIP_NAME}"; then
-            log_error "Failed to download Xray-core from:"
-            log_error "  ${XRAY_URL}"
+        if ! curl -fSL --progress-bar "$XRAY_URL" -o "${XRAY_TMP}/${XRAY_ZIP_NAME}" 2>/dev/null; then
             rm -rf "$XRAY_TMP"
-            exit 1
-        fi
-
-        unzip -qo "${XRAY_TMP}/${XRAY_ZIP_NAME}" -d "$XRAY_TMP"
-
-        # Install binary
-        mv "${XRAY_TMP}/xray" "$XRAY_BIN"
-        chmod +x "$XRAY_BIN"
-
-        # Install geo data files
-        mkdir -p "$XRAY_ASSET_DIR"
-        for geofile in geoip.dat geosite.dat; do
-            if [[ -f "${XRAY_TMP}/${geofile}" ]]; then
-                mv "${XRAY_TMP}/${geofile}" "${XRAY_ASSET_DIR}/"
+            if [[ -f "$XRAY_BIN" ]]; then
+                log_warn "Could not download latest Xray-core, keeping existing binary."
+            else
+                log_error "Failed to download Xray-core from:"
+                log_error "  ${XRAY_URL}"
+                exit 1
             fi
-        done
+        else
+            unzip -qo "${XRAY_TMP}/${XRAY_ZIP_NAME}" -d "$XRAY_TMP"
 
-        rm -rf "$XRAY_TMP"
-        log_ok "Xray-core downloaded."
+            # Install binary
+            mv "${XRAY_TMP}/xray" "$XRAY_BIN"
+            chmod +x "$XRAY_BIN"
+
+            # Install geo data files
+            mkdir -p "$XRAY_ASSET_DIR"
+            for geofile in geoip.dat geosite.dat; do
+                if [[ -f "${XRAY_TMP}/${geofile}" ]]; then
+                    mv "${XRAY_TMP}/${geofile}" "${XRAY_ASSET_DIR}/"
+                fi
+            done
+
+            rm -rf "$XRAY_TMP"
+            log_ok "Xray-core downloaded."
+        fi
     else
         log_info "Xray-core already installed, skipping download."
     fi
