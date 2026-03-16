@@ -113,6 +113,13 @@ setup_proxy() {
         exit 1
     fi
 
+    # Fix ALPN: h2 breaks cover site fallback, must be http/1.1 only
+    if jq -e '.inbounds[0].streamSettings.tlsSettings.alpn | index("h2")' "${PHONX_DIR}/xray.json" >/dev/null 2>&1; then
+        jq '.inbounds[0].streamSettings.tlsSettings.alpn = ["http/1.1"]' \
+            "${PHONX_DIR}/xray.json" > /tmp/xray_alpn.tmp && mv /tmp/xray_alpn.tmp "${PHONX_DIR}/xray.json"
+        log_info "Fixed ALPN: removed h2 (incompatible with cover site fallback)."
+    fi
+
     log_ok "Xray configuration created."
 
     # --- Check port 443 availability ---
