@@ -42,6 +42,7 @@ setup_core() {
         --arg ip "$SERVER_IP" \
         --argjson port 443 \
         --arg ws_path "$WS_PATH" \
+        --arg cf_host "${CF_HOST:-}" \
         --argjson dns_domains "$DNS_DOMAINS_JSON" \
         --arg dnstt_pubkey "$DNSTT_PUB" \
         --arg version "$PHONX_VERSION" \
@@ -49,6 +50,7 @@ setup_core() {
             server_ip: $ip,
             proxy_port: $port,
             ws_path: $ws_path,
+            cf_host: $cf_host,
             dns_domains: $dns_domains,
             dnstt_pubkey: $dnstt_pubkey,
             installed_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),

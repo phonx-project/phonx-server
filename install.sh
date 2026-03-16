@@ -203,6 +203,7 @@ check_existing_install() {
                 if command -v jq &>/dev/null; then
                     EXISTING_UUID=$(jq -r '.uuid // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
                     EXISTING_WS_PATH=$(jq -r '.ws_path // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
+                    EXISTING_CF_HOST=$(jq -r '.cf_host // empty' "${PHONX_DIR}/server.json" 2>/dev/null || true)
                 fi
                 if [[ -z "${EXISTING_UUID:-}" ]] && [[ -f "${PHONX_DIR}/xray.json" ]]; then
                     EXISTING_UUID=$(jq -r '.inbounds[1].settings.clients[0].id // empty' "${PHONX_DIR}/xray.json" 2>/dev/null || true)
@@ -491,6 +492,124 @@ verify_dns_records() {
 }
 
 # =============================================================================
+# CDN Fallback Configuration
+# =============================================================================
+verify_cdn_domain() {
+    local domain="$1"
+    local server_ip="$2"
+
+    log_step "Verifying CDN domain: ${domain}..."
+
+    # Check if dig is available
+    if ! command -v dig &>/dev/null; then
+        log_warn "dig not available. Skipping CDN domain verification."
+        return 0
+    fi
+
+    local resolved
+    resolved=$(dig +short "$domain" @1.1.1.1 2>/dev/null | head -1)
+
+    if [[ -z "$resolved" ]]; then
+        log_warn "Domain ${domain} does not resolve."
+        log_warn "Make sure you've added the DNS record in Cloudflare."
+        return 1
+    fi
+
+    if [[ "$resolved" == "$server_ip" ]]; then
+        log_warn "Domain resolves to VPS IP directly (${server_ip})!"
+        log_warn "The DNS record must be Proxied (orange cloud) in Cloudflare."
+        log_warn "Without Proxied mode, CDN fallback will NOT work."
+        return 1
+    fi
+
+    # Check if resolved IP is in Cloudflare ranges (basic check)
+    if [[ "$resolved" =~ ^(104\.|172\.6[4-9]\.|172\.7[0-1]\.|103\.21\.|103\.22\.|103\.31\.|141\.101\.|108\.162\.|190\.93\.|188\.114\.|197\.234\.|198\.41\.) ]]; then
+        log_ok "Domain resolves to Cloudflare IP (${resolved}) — Proxied mode confirmed."
+        return 0
+    fi
+
+    log_warn "Domain resolves to ${resolved} — cannot confirm this is a Cloudflare IP."
+    log_warn "CDN fallback may not work. Proceed anyway."
+    return 0
+}
+
+ask_cdn_domain() {
+    log_step "CDN Fallback Configuration (optional but recommended)"
+
+    # In update mode, check for existing cf_host
+    if [[ "${FORCE_UPDATE:-false}" == "true" ]] && [[ -n "${EXISTING_CF_HOST:-}" ]]; then
+        echo ""
+        log_info "Existing CDN domain: ${GREEN}${EXISTING_CF_HOST}${NC}"
+        read -r -p "Keep existing CDN domain? [Y/n] " keep_cdn < /dev/tty
+        case "$keep_cdn" in
+            [nN]|[nN][oO]) ;;
+            *)
+                CF_HOST="$EXISTING_CF_HOST"
+                export CF_HOST
+                log_ok "Keeping CDN domain: ${CF_HOST}"
+                return 0
+                ;;
+        esac
+    fi
+
+    echo ""
+    echo -e "${BOLD}Cloudflare CDN fallback lets clients connect even if your VPS IP is blocked.${NC}"
+    echo -e "Requirements:"
+    echo -e "  ${CYAN}1.${NC} A domain on Cloudflare (can be the same domain as DNS tunnel)"
+    echo -e "  ${CYAN}2.${NC} A Proxied (orange cloud) A record pointing to your VPS IP"
+    echo -e "  ${CYAN}3.${NC} Cloudflare SSL/TLS mode set to \"Full\" (not Strict)"
+    echo ""
+    echo -e "Example: if your domain is myblog.com, add this DNS record:"
+    echo -e "  Type: A  |  Name: ws  |  Content: ${SERVER_IP}  |  Proxy: ${YELLOW}Proxied (orange)${NC}"
+    echo ""
+    echo -e "Then enter ${GREEN}ws.myblog.com${NC} below."
+    echo ""
+
+    read -r -p "Enter CDN domain (or press Enter to skip): " cdn_input < /dev/tty
+
+    # Trim whitespace
+    cdn_input=$(echo "$cdn_input" | xargs)
+
+    if [[ -z "$cdn_input" ]]; then
+        CF_HOST=""
+        export CF_HOST
+        log_warn "CDN fallback disabled. Clients can only connect directly to VPS IP."
+        return 0
+    fi
+
+    # Validate domain format
+    if ! validate_domain "$cdn_input"; then
+        log_error "Invalid domain format: ${cdn_input}"
+        log_warn "Skipping CDN configuration."
+        CF_HOST=""
+        export CF_HOST
+        return 0
+    fi
+
+    CF_HOST="$cdn_input"
+    export CF_HOST
+
+    # Verify the domain
+    if ! verify_cdn_domain "$CF_HOST" "$SERVER_IP"; then
+        echo ""
+        read -r -p "Continue with this CDN domain anyway? [y/N] " cdn_confirm < /dev/tty
+        case "$cdn_confirm" in
+            [yY]|[yY][eE][sS])
+                log_warn "Using CDN domain ${CF_HOST} despite verification issues."
+                ;;
+            *)
+                CF_HOST=""
+                export CF_HOST
+                log_warn "CDN fallback disabled."
+                return 0
+                ;;
+        esac
+    fi
+
+    log_ok "CDN domain configured: ${CF_HOST}"
+}
+
+# =============================================================================
 # Config Generation & Completion
 # =============================================================================
 generate_first_config() {
@@ -560,6 +679,11 @@ show_completion() {
     echo -e "  IP:           ${SERVER_IP}"
     echo -e "  Proxy:        Port 443 (VLESS+WS+TLS 1.3)"
     echo -e "  DNS Tunnel:   Port 53 (dnstt → ${DNS_DOMAINS[*]})"
+    if [[ -n "${CF_HOST:-}" ]]; then
+        echo -e "  CDN Fallback: ${CF_HOST} (Cloudflare WebSocket)"
+    else
+        echo -e "  CDN Fallback: ${YELLOW}disabled${NC}"
+    fi
     echo -e "  Cover Site:   127.0.0.1:8080 (Xray fallback)"
     echo -e "  WS Path:      ${WS_PATH}"
     echo ""
@@ -603,6 +727,7 @@ main() {
     detect_server_ip
     ask_dns_domains
     verify_dns_records
+    ask_cdn_domain
 
     # --- Component Setup ---
     check_port_53
