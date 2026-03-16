@@ -4,6 +4,14 @@
 check_port_53() {
     log_step "Checking port 53 availability..."
 
+    # If our own dnstt-server is running (from previous install), stop it first
+    if ss -lnp 2>/dev/null | grep ':53 ' | grep -q 'dnstt-server'; then
+        log_info "Stopping existing dnstt-server to free port 53..."
+        systemctl stop dns-resolver 2>/dev/null || true
+        systemctl stop dnstt-server 2>/dev/null || true  # old service name
+        sleep 1
+    fi
+
     if ss -lnp 2>/dev/null | grep -q ':53 '; then
         # Check if systemd-resolved is the culprit
         if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
