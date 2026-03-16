@@ -127,6 +127,35 @@ run_uninstall() {
     tar czf "$BACKUP" -C /etc phonx 2>/dev/null || true
     log_ok "Backup saved to ${BACKUP}"
 
+    # Warn about sensitive contents and offer encryption
+    echo ""
+    log_warn "SECURITY: Backup contains private keys and certificates."
+
+    if command -v gpg &>/dev/null; then
+        read -r -p "Encrypt backup with password? [Y/n] " encrypt_choice < /dev/tty
+        case "$encrypt_choice" in
+            [nN]|[nN][oO])
+                log_warn "Backup is UNENCRYPTED. Secure or delete after use:"
+                log_warn "  gpg -c ${BACKUP}"
+                log_warn "  shred -u ${BACKUP}"
+                ;;
+            *)
+                if gpg --symmetric --cipher-algo AES256 "$BACKUP"; then
+                    rm -f "$BACKUP"
+                    BACKUP="${BACKUP}.gpg"
+                    log_ok "Backup encrypted: ${BACKUP}"
+                else
+                    log_warn "Encryption failed. Backup remains unencrypted."
+                fi
+                ;;
+        esac
+    else
+        log_warn "gpg not available. Backup is UNENCRYPTED."
+        log_warn "Encrypt or securely delete after use:"
+        log_warn "  gpg -c ${BACKUP}"
+        log_warn "  shred -u ${BACKUP}"
+    fi
+
     # Remove config directory
     rm -rf "$PHONX_DIR"
     log_ok "Configuration removed."

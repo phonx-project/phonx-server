@@ -114,5 +114,21 @@ setup_proxy() {
         log_warn "Consider stopping the conflicting service before starting Xray."
     fi
 
+    # --- Logrotate for Xray error log ---
+    mkdir -p /var/log/xray
+    cat > /etc/logrotate.d/phonx <<'LOGROTATE'
+/var/log/xray/error.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    create 640 root root
+    postrotate
+        systemctl reload xray 2>/dev/null || true
+    endscript
+}
+LOGROTATE
+
     log_ok "Proxy setup complete."
 }

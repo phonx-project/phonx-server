@@ -8,6 +8,11 @@ setup_systemd() {
     create_xray_service
     create_phonx_core_service
 
+    # Restrict service files — they contain paths to private keys and internal ports
+    chmod 600 /etc/systemd/system/dnstt-server.service
+    chmod 600 /etc/systemd/system/xray.service
+    chmod 600 /etc/systemd/system/phonx-core.service
+
     # Reload systemd to pick up new service files
     systemctl daemon-reload
 
@@ -56,9 +61,13 @@ setup_systemd() {
 create_dnstt_service() {
     log_info "Creating dnstt-server.service..."
 
-    # Build domain arguments — dnstt-server takes one domain
-    # Use the first domain from the list
+    # Write domain to EnvironmentFile (mode 600) — keeps domain out of .service file
     local DNSTT_DOMAIN="${DNS_DOMAINS[0]}"
+    cat > "${PHONX_DIR}/dnstt.env" <<EOF
+DNSTT_DOMAIN=${DNSTT_DOMAIN}
+DNSTT_FORWARD_PORT=10001
+EOF
+    chmod 600 "${PHONX_DIR}/dnstt.env"
 
     cat > /etc/systemd/system/dnstt-server.service <<DNSTTSERVICE
 [Unit]
@@ -69,11 +78,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=${PHONX_DIR}/dnstt.env
 ExecStart=/usr/local/bin/dnstt-server \\
     -privkey-file ${PHONX_DIR}/dnstt_key.priv \\
     -udp :53 \\
-    ${DNSTT_DOMAIN} \\
-    127.0.0.1:10001
+    \${DNSTT_DOMAIN} \\
+    127.0.0.1:\${DNSTT_FORWARD_PORT}
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
