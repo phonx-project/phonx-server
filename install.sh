@@ -99,9 +99,9 @@ run_uninstall() {
 
     echo ""
 
-    # Stop and disable services
+    # Stop and disable services (check both old and new names for upgrade compatibility)
     log_info "Stopping services..."
-    for svc in dnstt-server xray phonx-core; do
+    for svc in dns-resolver web-gateway web-app dnstt-server xray phonx-core; do
         if systemctl is-active --quiet "${svc}.service" 2>/dev/null; then
             systemctl stop "${svc}.service" 2>/dev/null || true
         fi
@@ -548,12 +548,12 @@ show_completion() {
     # Print service status summary
     echo -e "${BOLD}Service Status:${NC}"
     local svc_dnstt svc_xray svc_core
-    svc_dnstt=$(systemctl is-active dnstt-server.service 2>/dev/null) || true
-    svc_xray=$(systemctl is-active xray.service 2>/dev/null) || true
-    svc_core=$(systemctl is-active phonx-core.service 2>/dev/null) || true
-    echo -e "  dnstt-server: ${svc_dnstt:-unknown}"
-    echo -e "  xray:         ${svc_xray:-unknown}"
-    echo -e "  phonx-core:   ${svc_core:-unknown}"
+    svc_dnstt=$(systemctl is-active ${SVC_DNSTT}.service 2>/dev/null) || true
+    svc_xray=$(systemctl is-active ${SVC_XRAY}.service 2>/dev/null) || true
+    svc_core=$(systemctl is-active ${SVC_CORE}.service 2>/dev/null) || true
+    echo -e "  DNS tunnel:   ${svc_dnstt:-unknown}"
+    echo -e "  Proxy:        ${svc_xray:-unknown}"
+    echo -e "  Cover site:   ${svc_core:-unknown}"
     echo ""
 
     echo -e "${BOLD}Server Details:${NC}"
@@ -565,12 +565,12 @@ show_completion() {
     echo ""
 
     echo -e "${BOLD}Useful Commands:${NC}"
-    echo -e "  ${CYAN}phonx-core genconfig${NC}              Generate new client config"
-    echo -e "  ${CYAN}systemctl status xray${NC}             Check proxy status"
-    echo -e "  ${CYAN}systemctl status dnstt-server${NC}     Check DNS tunnel status"
-    echo -e "  ${CYAN}systemctl status phonx-core${NC}       Check core daemon status"
-    echo -e "  ${CYAN}journalctl -u xray -f${NC}            Follow Xray logs"
-    echo -e "  ${CYAN}journalctl -u dnstt-server -f${NC}    Follow dnstt logs"
+    echo -e "  ${CYAN}phonx-core genconfig${NC}                  Generate new client config"
+    echo -e "  ${CYAN}systemctl status ${SVC_XRAY}${NC}          Check proxy status"
+    echo -e "  ${CYAN}systemctl status ${SVC_DNSTT}${NC}        Check DNS tunnel status"
+    echo -e "  ${CYAN}systemctl status ${SVC_CORE}${NC}              Check cover site status"
+    echo -e "  ${CYAN}journalctl -u ${SVC_XRAY} -f${NC}          Follow proxy logs"
+    echo -e "  ${CYAN}journalctl -u ${SVC_DNSTT} -f${NC}        Follow DNS tunnel logs"
     echo ""
 
     echo -e "${BOLD}Config Directory:${NC} ${PHONX_DIR}/"

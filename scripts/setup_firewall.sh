@@ -16,7 +16,14 @@ apply_rules() {
     $cmd -C INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || \
         $cmd -A INPUT -p tcp --dport 22 -j ACCEPT
 
-    # Allow DNS (port 53) for dnstt — both TCP and UDP
+    # Allow DNS (port 53) for dnstt — UDP with rate limiting to prevent abuse
+    # Rate limit: 50 packets/sec per source IP — enough for dnstt, blocks floods
+    $cmd -C INPUT -p udp --dport 53 -m hashlimit \
+        --hashlimit-above 50/sec --hashlimit-burst 100 --hashlimit-mode srcip \
+        --hashlimit-name dns_limit -j DROP 2>/dev/null || \
+        $cmd -A INPUT -p udp --dport 53 -m hashlimit \
+            --hashlimit-above 50/sec --hashlimit-burst 100 --hashlimit-mode srcip \
+            --hashlimit-name dns_limit -j DROP
     $cmd -C INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || \
         $cmd -A INPUT -p udp --dport 53 -j ACCEPT
     $cmd -C INPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || \

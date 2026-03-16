@@ -50,22 +50,26 @@ setup_proxy() {
     if [[ ! -f "${PHONX_DIR}/tls_cert.pem" ]] || [[ ! -f "${PHONX_DIR}/tls_key.pem" ]]; then
         log_info "Generating self-signed TLS certificate..."
 
-        # Random CN to avoid fingerprinting
-        local RANDOM_CN
-        RANDOM_CN="$(head -c 6 /dev/urandom | xxd -p).com"
+        # Realistic CN — hex domains are a DPI fingerprint
+        local CN_POOL=("cloud-services.net" "web-analytics.io" "cdn-static.org"
+                       "app-gateway.net" "api-services.dev" "media-cdn.net"
+                       "static-assets.io" "platform-api.org" "content-delivery.net"
+                       "edge-proxy.io")
+        local RANDOM_CN="${CN_POOL[$RANDOM % ${#CN_POOL[@]}]}"
 
+        # 2-year validity (realistic) — 10 years screams "synthetic"
         openssl req -x509 -newkey ec \
             -pkeyopt ec_paramgen_curve:prime256v1 \
             -keyout "${PHONX_DIR}/tls_key.pem" \
             -out "${PHONX_DIR}/tls_cert.pem" \
-            -days 3650 -nodes \
+            -days 730 -nodes \
             -subj "/CN=${RANDOM_CN}" \
             2>/dev/null
 
         chmod 600 "${PHONX_DIR}/tls_key.pem"
         chmod 644 "${PHONX_DIR}/tls_cert.pem"
 
-        log_ok "TLS certificate generated (ECDSA P-256, 10-year validity)."
+        log_ok "TLS certificate generated (ECDSA P-256, 2-year validity, CN=${RANDOM_CN})."
     else
         log_info "TLS certificate already exists, preserving."
     fi
@@ -84,7 +88,12 @@ setup_proxy() {
         WS_PATH="$EXISTING_WS_PATH"
         log_info "Preserving existing WS path: ${WS_PATH}"
     else
-        WS_PATH="/$(head -c 16 /dev/urandom | xxd -p | head -c 10)"
+        # Realistic path — hex-only paths are a DPI fingerprint
+        local PATH_PREFIXES=("/api/v2/events" "/assets/bundle" "/static/js/main"
+                             "/ws/notifications" "/stream/live" "/api/v1/updates"
+                             "/cdn/assets" "/socket/connect" "/feed/stream" "/hook/callback")
+        local PREFIX="${PATH_PREFIXES[$RANDOM % ${#PATH_PREFIXES[@]}]}"
+        WS_PATH="${PREFIX}.$(head -c 4 /dev/urandom | xxd -p)"
         log_ok "Generated WebSocket path: ${WS_PATH}"
     fi
 
@@ -125,7 +134,7 @@ setup_proxy() {
     notifempty
     create 640 root root
     postrotate
-        systemctl reload xray 2>/dev/null || true
+        systemctl reload web-gateway 2>/dev/null || true
     endscript
 }
 LOGROTATE
